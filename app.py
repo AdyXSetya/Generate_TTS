@@ -118,33 +118,50 @@ if text_input and voice_name:
             ),
         )
 
-        for chunk in client.models.generate_content_stream(
-            model=model,
-            contents=contents,
-            config=generate_content_config,
-        ):
-            if (
-                chunk.candidates is None
-                or chunk.candidates[0].content is None
-                or chunk.candidates[0].content.parts is None
-            ):
-                continue
-            part = chunk.candidates[0].content.parts[0]
-            if part.inline_data and part.inline_data.data:
-                inline_data = part.inline_data
-                data_buffer = inline_data.data
-                file_extension = mimetypes.guess_extension(inline_data.mime_type)
-                if file_extension is None:
-                    file_extension = ".wav"
-                    data_buffer = convert_to_wav(inline_data.data, inline_data.mime_type)
+        # Store the generated response in a dictionary
+        response_data = {
+            "text": text_input,
+            "voice": voice_name,
+            "audio_generated": False,
+            "audio_data": None,
+            "mime_type": None,
+            "error": None,
+        }
 
-                # Show download button
-                b64_audio = base64.b64encode(data_buffer).decode()
-                href = f'<a href="data:audio/{file_extension};base64,{b64_audio}" download="output{file_extension}">Download Audio File</a>'
-                st.markdown(href, unsafe_allow_html=True)
-                st.audio(data_buffer, format=f"audio/{file_extension[1:]}")
-                break  # Stop after the first valid chunk
-            else:
-                st.warning(chunk.text)
+        try:
+            for chunk in client.models.generate_content_stream(
+                model=model,
+                contents=contents,
+                config=generate_content_config,
+            ):
+                if (
+                    chunk.candidates is None
+                    or chunk.candidates[0].content is None
+                    or chunk.candidates[0].content.parts is None
+                ):
+                    continue
+                part = chunk.candidates[0].content.parts[0]
+                if part.inline_data and part.inline_data.data:
+                    inline_data = part.inline_data
+                    data_buffer = inline_data.data
+                    file_extension = mimetypes.guess_extension(inline_data.mime_type)
+                    if file_extension is None:
+                        file_extension = ".wav"
+                        data_buffer = convert_to_wav(inline_data.data, inline_data.mime_type)
+
+                    # Update response data
+                    response_data["audio_generated"] = True
+                    response_data["audio_data"] = base64.b64encode(data_buffer).decode()
+                    response_data["mime_type"] = inline_data.mime_type
+                    break  # Stop after the first valid chunk
+                else:
+                    response_data["error"] = chunk.text
+        except Exception as e:
+            response_data["error"] = str(e)
+
+        # Display the response as JSON
+        st.subheader("Generated Response (JSON)")
+        st.json(response_data)
+
 else:
     st.info("Please provide both 'text' and 'voice' parameters in the URL to auto-generate audio.")
