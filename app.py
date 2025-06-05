@@ -4,7 +4,7 @@ import mimetypes
 import struct
 from google import genai
 from google.genai import types
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 # --- FUNGSI UTAMA HARUS DIDEFINISIKAN DI ATAS ---
 def parse_audio_mime_type(mime_type: str) -> dict[str, int | None]:
@@ -58,6 +58,10 @@ def convert_to_wav(audio_data: bytes, mime_type: str) -> bytes:
 
 # --- SAMPAI SINI ---
 
+# Set page config
+st.set_page_config(page_title="Gemini TTS", layout="centered")
+st.title("🔊 Gemini Text-to-Speech Generator")
+
 # Load API Key
 try:
     api_key = st.secrets["GEMINI_API_KEY"]
@@ -75,8 +79,19 @@ voice_name = query_params.get("voice", ["Zephyr"])[0]  # Default to "Zephyr" if 
 # Decode text input (in case it's URL-encoded)
 text_input = unquote(text_input)
 
-# Check if both required parameters are present
-if text_input and voice_name:
+# Validate inputs
+if not text_input or not voice_name:
+    st.info("Please provide both 'text' and 'voice' parameters in the URL to auto-generate audio.")
+    st.stop()
+
+# Generate a URL for sharing or testing
+encoded_text = quote(text_input)
+url = f"?text={encoded_text}&voice={voice_name}"
+st.markdown(f"**Share this URL to generate the same audio:**\n\n[{st.session_state.get('server_url', 'http://localhost:8501')}{url}]({st.session_state.get('server_url', 'http://localhost:8501')}{url})", unsafe_allow_html=True)
+
+# Auto-generate logic
+with st.spinner("Generating audio..."):
+
     model = "gemini-2.5-flash-preview-tts"
     contents = [
         types.Content(
@@ -118,21 +133,11 @@ if text_input and voice_name:
                 file_extension = ".wav"
                 data_buffer = convert_to_wav(inline_data.data, inline_data.mime_type)
 
+            # Show download button
             b64_audio = base64.b64encode(data_buffer).decode()
-            url_download = f"data:audio/{file_extension[1:]};base64,{b64_audio}"
-
-            result = {
-                "audio": b64_audio,
-                "mime_type": inline_data.mime_type,
-                "file_extension": file_extension,
-                "url_download": url_download,
-            }
-
-            st.json(result)
-            break
-else:
-    st.json({
-        "error": "Missing required parameters",
-        "required": ["text", "voice"],
-        "example_url": "?text=Hello%20World&voice=Zephyr"
-    })
+            href = f'<a href="data:audio/{file_extension};base64,{b64_audio}" download="output{file_extension}">Download Audio File</a>'
+            st.markdown(href, unsafe_allow_html=True)
+            st.audio(data_buffer, format=f"audio/{file_extension[1:]}")
+            break  # Stop after the first valid chunk
+        else:
+            st.warning(chunk.text)
