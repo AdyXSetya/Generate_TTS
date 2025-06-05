@@ -68,7 +68,7 @@ except KeyError:
 client = genai.Client(api_key=api_key)
 
 # Get query parameters from URL
-query_params = st.query_params()
+query_params = st.experimental_get_query_params()
 text_input = query_params.get("text", [""])[0]  # Default to empty string if not provided
 voice_name = query_params.get("voice", ["Zephyr"])[0]  # Default to "Zephyr" if not provided
 
