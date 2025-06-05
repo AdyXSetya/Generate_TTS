@@ -58,10 +58,6 @@ def convert_to_wav(audio_data: bytes, mime_type: str) -> bytes:
 
 # --- SAMPAI SINI ---
 
-# Set page config
-st.set_page_config(page_title="Gemini TTS", layout="centered")
-st.title("🔊 Gemini Text-to-Speech Generator")
-
 # Load API Key
 try:
     api_key = st.secrets["GEMINI_API_KEY"]
@@ -72,7 +68,7 @@ except KeyError:
 client = genai.Client(api_key=api_key)
 
 # Get query parameters from URL
-query_params = st.experimental_get_query_params()
+query_params = st.query_params()
 text_input = query_params.get("text", [""])[0]  # Default to empty string if not provided
 voice_name = query_params.get("voice", ["Zephyr"])[0]  # Default to "Zephyr" if not provided
 
@@ -87,7 +83,6 @@ if not text_input or not voice_name:
 # Generate a URL for sharing or testing
 encoded_text = quote(text_input)
 url = f"?text={encoded_text}&voice={voice_name}"
-st.markdown(f"**Share this URL to generate the same audio:**\n\n[{st.session_state.get('server_url', 'http://localhost:8501')}{url}]({st.session_state.get('server_url', 'http://localhost:8501')}{url})", unsafe_allow_html=True)
 
 # Auto-generate logic
 with st.spinner("Generating audio..."):
