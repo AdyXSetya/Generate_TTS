@@ -93,8 +93,7 @@ encoded_text = quote(text_input)
 url = f"?text={encoded_text}&voice={voice_name}"
 st.markdown(f"**Share this URL to generate the same audio:**\n\n[{st.session_state.get('server_url', 'http://localhost:8501')}{url}]({st.session_state.get('server_url', 'http://localhost:8501')}{url})", unsafe_allow_html=True)
 
-# Auto-generate logic
-if text_input and voice_name:
+if st.button("Generate Audio"):
     with st.spinner("Generating audio..."):
 
         model = "gemini-2.5-flash-preview-tts"
@@ -143,8 +142,5 @@ if text_input and voice_name:
                 href = f'<a href="data:audio/{file_extension};base64,{b64_audio}" download="output{file_extension}">Download Audio File</a>'
                 st.markdown(href, unsafe_allow_html=True)
                 st.audio(data_buffer, format=f"audio/{file_extension[1:]}")
-                break  # Stop after the first valid chunk
             else:
                 st.warning(chunk.text)
-else:
-    st.info("Please provide both 'text' and 'voice' parameters in the URL to auto-generate audio.")
