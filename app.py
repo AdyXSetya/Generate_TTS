@@ -9,7 +9,7 @@ from google.genai import types
 
 st.set_page_config(page_title="Gemini TTS", layout="centered")
 st.title("🔊 Gemini Text to Speech Generator")
-
+GEMINI_API_KEY = "AIzaSyDIcRVPCARBuz23GhUhfmVsNF9djNm8NAg"
 # Load API Key
 try:
     api_key = st.secrets["GEMINI_API_KEY"]
