@@ -1,17 +1,15 @@
-from fastapi import FastAPI, HTTPException
-from google import genai
-from google.genai import types
+import streamlit as st
 import base64
 import mimetypes
-import struct
 import os
-from dotenv import load_dotenv
+import re
+import struct
+from google import genai
+from google.genai import types
+from urllib.parse import quote, unquote
 
-load_dotenv()  # Muat variabel dari .env
-
-app = FastAPI(title="Gemini TTS API")
-
-def parse_audio_mime_type(mime_type: str):
+# --- FUNGSI UTAMA HARUS DIDEFINISIKAN DI ATAS ---
+def parse_audio_mime_type(mime_type: str) -> dict[str, int | None]:
     bits_per_sample = 16
     rate = 24000
     parts = mime_type.split(";")
@@ -29,6 +27,7 @@ def parse_audio_mime_type(mime_type: str):
             except Exception:
                 pass
     return {"bits_per_sample": bits_per_sample, "rate": rate}
+
 
 def convert_to_wav(audio_data: bytes, mime_type: str) -> bytes:
     parameters = parse_audio_mime_type(mime_type)
@@ -59,67 +58,89 @@ def convert_to_wav(audio_data: bytes, mime_type: str) -> bytes:
     )
     return header + audio_data
 
-@app.post("/generate-audio")
-async def generate_audio(request: dict):
-    text = request.get("text")
-    voice = request.get("voice", "Zephyr")  # Default voice
+# --- SAMPAI SINI ---
 
-    if not text:
-        raise HTTPException(status_code=400, detail="Text is required")
+# Set page config
+st.set_page_config(page_title="Gemini TTS", layout="centered")
+st.title("🔊 Gemini Text-to-Speech Generator")
 
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="API Key not set")
+# Load API Key
+try:
+    api_key = st.secrets["GEMINI_API_KEY"]
+except KeyError:
+    st.error("API Key not found. Please set GEMINI_API_KEY in secrets.")
+    st.stop()
 
-    client = genai.Client(api_key=api_key)
+client = genai.Client(api_key=api_key)
 
-    model = "gemini-2.5-flash-preview-tts"
-    contents = [
-        types.Content(
-            role="user",
-            parts=[
-                types.Part.from_text(text=text),
-            ],
-        ),
-    ]
-    generate_content_config = types.GenerateContentConfig(
-        temperature=1,
-        response_modalities=["audio"],
-        speech_config=types.SpeechConfig(
-            voice_config=types.VoiceConfig(
-                prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                    voice_name=voice
+# Get query parameters from URL
+query_params = st.experimental_get_query_params()
+text_input = query_params.get("text", [""])[0]  # Default to empty string if not provided
+voice_name = query_params.get("voice", ["Zephyr"])[0]  # Default to "Zephyr" if not provided
+
+# Decode text input (in case it's URL-encoded)
+text_input = unquote(text_input)
+
+# Input Form (Optional: For users who want to manually edit the text)
+text_input = st.text_area("Enter your text (supports SSML):", value=text_input)
+
+# Voice selection
+voice_options = ["Zephyr", "Echo", "Fable", "Onyx", "Nova", "Shimmer"]
+voice_name = st.selectbox("Choose voice:", voice_options, index=voice_options.index(voice_name))
+
+# Generate a URL for sharing or testing
+encoded_text = quote(text_input)
+url = f"?text={encoded_text}&voice={voice_name}"
+st.markdown(f"**Share this URL to generate the same audio:**\n\n[{st.session_state.get('server_url', 'http://localhost:8501')}{url}]({st.session_state.get('server_url', 'http://localhost:8501')}{url})", unsafe_allow_html=True)
+
+if st.button("Generate Audio"):
+    with st.spinner("Generating audio..."):
+
+        model = "gemini-2.5-flash-preview-tts"
+        contents = [
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_text(text=text_input),
+                ],
+            ),
+        ]
+        generate_content_config = types.GenerateContentConfig(
+            temperature=1,
+            response_modalities=["audio"],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name=voice_name
+                    )
                 )
-            )
-        ),
-    )
+            ),
+        )
 
-    for chunk in client.models.generate_content_stream(
-        model=model,
-        contents=contents,
-        config=generate_content_config,
-    ):
-        if (
-            chunk.candidates is None
-            or chunk.candidates[0].content is None
-            or chunk.candidates[0].content.parts is None
+        for chunk in client.models.generate_content_stream(
+            model=model,
+            contents=contents,
+            config=generate_content_config,
         ):
-            continue
-        part = chunk.candidates[0].content.parts[0]
-        if part.inline_data and part.inline_data.data:
-            inline_data = part.inline_data
-            data_buffer = inline_data.data
-            file_extension = mimetypes.guess_extension(inline_data.mime_type)
-            if file_extension is None:
-                file_extension = ".wav"
-                data_buffer = convert_to_wav(inline_data.data, inline_data.mime_type)
+            if (
+                chunk.candidates is None
+                or chunk.candidates[0].content is None
+                or chunk.candidates[0].content.parts is None
+            ):
+                continue
+            part = chunk.candidates[0].content.parts[0]
+            if part.inline_data and part.inline_data.data:
+                inline_data = part.inline_data
+                data_buffer = inline_data.data
+                file_extension = mimetypes.guess_extension(inline_data.mime_type)
+                if file_extension is None:
+                    file_extension = ".wav"
+                    data_buffer = convert_to_wav(inline_data.data, inline_data.mime_type)
 
-            # Encode to Base64
-            audio_b64 = base64.b64encode(data_buffer).decode("utf-8")
-            return {
-                "audio_base64": audio_b64,
-                "file_extension": file_extension,
-                "mime_type": inline_data.mime_type
-            }
-
-    raise HTTPException(status_code=500, detail="Failed to generate audio")
+                # Show download button
+                b64_audio = base64.b64encode(data_buffer).decode()
+                href = f'<a href="data:audio/{file_extension};base64,{b64_audio}" download="output{file_extension}">Download Audio File</a>'
+                st.markdown(href, unsafe_allow_html=True)
+                st.audio(data_buffer, format=f"audio/{file_extension[1:]}")
+            else:
+                st.warning(chunk.text)
