@@ -7,9 +7,61 @@ import struct
 from google import genai
 from google.genai import types
 
+# --- FUNGSI UTAMA HARUS DIDEFINISIKAN DI ATAS ---
+def parse_audio_mime_type(mime_type: str) -> dict[str, int | None]:
+    bits_per_sample = 16
+    rate = 24000
+    parts = mime_type.split(";")
+    for param in parts:
+        param = param.strip()
+        if param.lower().startswith("rate="):
+            try:
+                rate_str = param.split("=", 1)[1]
+                rate = int(rate_str)
+            except Exception:
+                pass
+        elif param.startswith("audio/L"):
+            try:
+                bits_per_sample = int(param.split("L", 1)[1])
+            except Exception:
+                pass
+    return {"bits_per_sample": bits_per_sample, "rate": rate}
+
+
+def convert_to_wav(audio_data: bytes, mime_type: str) -> bytes:
+    parameters = parse_audio_mime_type(mime_type)
+    bits_per_sample = parameters["bits_per_sample"]
+    sample_rate = parameters["rate"]
+    num_channels = 1
+    data_size = len(audio_data)
+    bytes_per_sample = bits_per_sample // 8
+    block_align = num_channels * bytes_per_sample
+    byte_rate = sample_rate * block_align
+    chunk_size = 36 + data_size
+
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF",
+        chunk_size,
+        b"WAVE",
+        b"fmt ",
+        16,
+        1,
+        num_channels,
+        sample_rate,
+        byte_rate,
+        block_align,
+        bits_per_sample,
+        b"data",
+        data_size
+    )
+    return header + audio_data
+# --- SAMPAI SINI ---
+
+# Set page config
 st.set_page_config(page_title="Gemini TTS", layout="centered")
-st.title("🔊 Gemini Text to Speech Generator")
-GEMINI_API_KEY = "AIzaSyDIcRVPCARBuz23GhUhfmVsNF9djNm8NAg"
+st.title("🔊 Gemini Text-to-Speech Generator")
+
 # Load API Key
 try:
     api_key = st.secrets["GEMINI_API_KEY"]
@@ -20,12 +72,9 @@ except KeyError:
 client = genai.Client(api_key=api_key)
 
 # Input Form
-text_input = st.text_area("Enter your text (supports SSML):", value="""<speak>ngerasa gaya kamu gitu-gitu aja ; <break time="150ms"/> tas rantai ini nge-boost look kamu jadi classy dalam sekejap</speak>
-<speak><emphasis level="strong">warna</emphasis> banyak <prosody rate="90%" pitch="+2%">pilih yang paling kamu</prosody></speak>""")
+text_input = st.text_area("Enter your text (supports SSML):", value="""...""")
 
-voice_name = st.selectbox("Choose voice:", [
-    "Zephyr", "Echo", "Fable", "Onyx", "Nova", "Shimmer"
-])
+voice_name = st.selectbox("Choose voice:", ["Zephyr", "Echo", "Fable", "Onyx", "Nova", "Shimmer"])
 
 if st.button("Generate Audio"):
     with st.spinner("Generating audio..."):
@@ -75,54 +124,6 @@ if st.button("Generate Audio"):
                 b64_audio = base64.b64encode(data_buffer).decode()
                 href = f'<a href="data:audio/{file_extension};base64,{b64_audio}" download="output{file_extension}">Download Audio File</a>'
                 st.markdown(href, unsafe_allow_html=True)
-                st.audio(data_buffer, format=f"audio/{file_extension.replace('.', '')}")
+                st.audio(data_buffer, format=f"audio/{file_extension[1:]}")
             else:
                 st.warning(chunk.text)
-
-def convert_to_wav(audio_data: bytes, mime_type: str) -> bytes:
-    parameters = parse_audio_mime_type(mime_type)
-    bits_per_sample = parameters["bits_per_sample"]
-    sample_rate = parameters["rate"]
-    num_channels = 1
-    data_size = len(audio_data)
-    bytes_per_sample = bits_per_sample // 8
-    block_align = num_channels * bytes_per_sample
-    byte_rate = sample_rate * block_align
-    chunk_size = 36 + data_size
-
-    header = struct.pack(
-        "<4sI4s4sIHHIIHH4sI",
-        b"RIFF",
-        chunk_size,
-        b"WAVE",
-        b"fmt ",
-        16,
-        1,
-        num_channels,
-        sample_rate,
-        byte_rate,
-        block_align,
-        bits_per_sample,
-        b"data",
-        data_size
-    )
-    return header + audio_data
-
-def parse_audio_mime_type(mime_type: str) -> dict[str, int | None]:
-    bits_per_sample = 16
-    rate = 24000
-    parts = mime_type.split(";")
-    for param in parts:
-        param = param.strip()
-        if param.lower().startswith("rate="):
-            try:
-                rate_str = param.split("=", 1)[1]
-                rate = int(rate_str)
-            except Exception:
-                pass
-        elif param.startswith("audio/L"):
-            try:
-                bits_per_sample = int(param.split("L", 1)[1])
-            except Exception:
-                pass
-    return {"bits_per_sample": bits_per_sample, "rate": rate}
