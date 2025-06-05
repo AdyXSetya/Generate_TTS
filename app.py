@@ -86,7 +86,6 @@ if not text_input or not voice_name:
 # Generate a URL for sharing or testing
 encoded_text = quote(text_input)
 url = f"?text={encoded_text}&voice={voice_name}"
-st.markdown(f"**Share this URL to generate the same audio:**\n\n[{st.session_state.get('server_url', 'http://localhost:8501')}{url}]({st.session_state.get('server_url', 'http://localhost:8501')}{url})", unsafe_allow_html=True)
 
 # Auto-generate logic
 with st.spinner("Generating audio..."):
