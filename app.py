@@ -12,7 +12,7 @@ st.title("🔊 Gemini Text to Speech Generator")
 
 # Load API Key
 try:
-    api_key = st.secrets["GEMINI_API_KEY"]
+    api_key = st.secrets["AIzaSyDIcRVPCARBuz23GhUhfmVsNF9djNm8NAg"]
 except KeyError:
     st.error("API Key not found. Please set GEMINI_API_KEY in secrets.")
     st.stop()
