@@ -1,17 +1,96 @@
 import streamlit as st
-from streamlit import runtime
-from streamlit.runtime.scriptrunner import get_script_run_ctx
-from streamlit.server.server import Server
-import json
-from google import genai
-from google.genai import types
 import base64
 import mimetypes
-import struct
 import os
+import struct
+from google import genai
+from google.genai import types
 
-# === Fungsi utilitas parsing MIME dan WAV ===
-def parse_audio_mime_type(mime_type: str):
+# Konfigurasi awal
+st.set_page_config(page_title="Streamlit TTS API", layout="centered")
+
+# Cek apakah ada query params
+query_params = st.query_params
+if not query_params:
+    st.write("Gunakan format:")
+    st.code("https://your-streamlit-app.streamlit.app/?text=Teks+disini&voice=Zephyr")
+    st.stop()
+
+text = query_params.get("text")
+voice = query_params.get("voice", ["Zephyr"])[0]  # Default voice 
+
+if not text:
+    st.error("Parameter 'text' diperlukan.")
+    st.stop()
+
+# Load API Key
+try:
+    api_key = st.secrets["GEMINI_API_KEY"]
+except KeyError:
+    st.error("API Key not found. Please set GEMINI_API_KEY in secrets.")
+    st.stop()
+
+client = genai.Client(api_key=api_key)
+
+# Mulai generate audio
+model = "gemini-2.5-flash-preview-tts"
+contents = [
+    types.Content(
+        role="user",
+        parts=[
+            types.Part.from_text(text=text),
+        ],
+    ),
+]
+generate_content_config = types.GenerateContentConfig(
+    temperature=1,
+    response_modalities=["audio"],
+    speech_config=types.SpeechConfig(
+        voice_config=types.VoiceConfig(
+            prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                voice_name=voice
+            )
+        )
+    ),
+)
+
+for chunk in client.models.generate_content_stream(
+    model=model,
+    contents=contents,
+    config=generate_content_config,
+):
+    if (
+        chunk.candidates is None
+        or chunk.candidates[0].content is None
+        or chunk.candidates[0].content.parts is None
+    ):
+        continue
+    part = chunk.candidates[0].content.parts[0]
+    if part.inline_data and part.inline_data.data:
+        inline_data = part.inline_data
+        data_buffer = inline_data.data
+        file_extension = mimetypes.guess_extension(inline_data.mime_type)
+        if file_extension is None:
+            file_extension = ".wav"
+            data_buffer = convert_to_wav(inline_data.data, inline_data.mime_type)
+
+        # Encode Base64
+        audio_b64 = base64.b64encode(data_buffer).decode("utf-8")
+
+        # Output sebagai JSON-like
+        st.markdown("### Hasil Audio (Base64)")
+        st.code(f"""
+{{
+  "audio_base64": "{audio_b64}",
+  "file_extension": "{file_extension}",
+  "mime_type": "{inline_data.mime_type}"
+}}
+        """)
+        break
+else:
+    st.error("Gagal menghasilkan audio.")
+
+def parse_audio_mime_type(mime_type: str) -> dict:
     bits_per_sample = 16
     rate = 24000
     parts = mime_type.split(";")
@@ -58,78 +137,3 @@ def convert_to_wav(audio_data: bytes, mime_type: str) -> bytes:
         data_size
     )
     return header + audio_data
-
-# === Endpoint handler ===
-@st.server_request_handler("/generate")
-def handle_generate(request):
-    if request.method == "POST":
-        try:
-            data = json.loads(request.body)
-            text = data.get("text")
-            voice = data.get("voice", "Zephyr")
-
-            if not text:
-                return {"error": "Missing 'text' field"}, 400
-
-            # Inisialisasi client Gemini
-            api_key = st.secrets.get("GEMINI_API_KEY")
-            if not api_key:
-                return {"error": "API Key not set"}, 500
-
-            client = genai.Client(api_key=api_key)
-
-            model = "gemini-2.5-flash-preview-tts"
-            contents = [
-                types.Content(
-                    role="user",
-                    parts=[types.Part.from_text(text=text)],
-                ),
-            ]
-            generate_content_config = types.GenerateContentConfig(
-                temperature=1,
-                response_modalities=["audio"],
-                speech_config=types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice)
-                    )
-                ),
-            )
-
-            for chunk in client.models.generate_content_stream(
-                model=model,
-                contents=contents,
-                config=generate_content_config,
-            ):
-                if (
-                    chunk.candidates is None
-                    or chunk.candidates[0].content is None
-                    or chunk.candidates[0].content.parts is None
-                ):
-                    continue
-                part = chunk.candidates[0].content.parts[0]
-                if part.inline_data and part.inline_data.data:
-                    inline_data = part.inline_data
-                    data_buffer = inline_data.data
-                    file_extension = mimetypes.guess_extension(inline_data.mime_type)
-                    if file_extension is None:
-                        file_extension = ".wav"
-                        data_buffer = convert_to_wav(inline_data.data, inline_data.mime_type)
-
-                    audio_b64 = base64.b64encode(data_buffer).decode("utf-8")
-                    return {
-                        "audio_base64": audio_b64,
-                        "file_extension": file_extension,
-                        "mime_type": inline_data.mime_type,
-                    }
-
-            return {"error": "Failed to generate audio"}, 500
-
-        except Exception as e:
-            return {"error": str(e)}, 500
-
-    return {"error": "Method not allowed"}, 405
-
-# === UI Streamlit (opsional) ===
-st.title("🔊 TTS API on Streamlit")
-st.markdown("Endpoint: `https://your-app-url.streamlit.app/generate`") 
-st.markdown("Kirim POST request dari Postman/JavaScript ke endpoint tersebut.")
