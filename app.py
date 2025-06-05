@@ -1,8 +1,6 @@
 import streamlit as st
 import base64
 import mimetypes
-import os
-import re
 import struct
 from google import genai
 from google.genai import types
@@ -81,66 +79,65 @@ voice_name = query_params.get("voice", ["Zephyr"])[0]  # Default to "Zephyr" if 
 # Decode text input (in case it's URL-encoded)
 text_input = unquote(text_input)
 
-# Input Form (Optional: For users who want to manually edit the text)
-text_input = st.text_area("Enter your text (supports SSML):", value=text_input)
-
-# Voice selection
-voice_options = ["Zephyr", "Echo", "Fable", "Onyx", "Nova", "Shimmer"]
-voice_name = st.selectbox("Choose voice:", voice_options, index=voice_options.index(voice_name))
+# Validate inputs
+if not text_input or not voice_name:
+    st.info("Please provide both 'text' and 'voice' parameters in the URL to auto-generate audio.")
+    st.stop()
 
 # Generate a URL for sharing or testing
 encoded_text = quote(text_input)
 url = f"?text={encoded_text}&voice={voice_name}"
 st.markdown(f"**Share this URL to generate the same audio:**\n\n[{st.session_state.get('server_url', 'http://localhost:8501')}{url}]({st.session_state.get('server_url', 'http://localhost:8501')}{url})", unsafe_allow_html=True)
 
-if st.button("Generate Audio"):
-    with st.spinner("Generating audio..."):
+# Auto-generate logic
+with st.spinner("Generating audio..."):
 
-        model = "gemini-2.5-flash-preview-tts"
-        contents = [
-            types.Content(
-                role="user",
-                parts=[
-                    types.Part.from_text(text=text_input),
-                ],
-            ),
-        ]
-        generate_content_config = types.GenerateContentConfig(
-            temperature=1,
-            response_modalities=["audio"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name=voice_name
-                    )
+    model = "gemini-2.5-flash-preview-tts"
+    contents = [
+        types.Content(
+            role="user",
+            parts=[
+                types.Part.from_text(text=text_input),
+            ],
+        ),
+    ]
+    generate_content_config = types.GenerateContentConfig(
+        temperature=1,
+        response_modalities=["audio"],
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                    voice_name=voice_name
                 )
-            ),
-        )
+            )
+        ),
+    )
 
-        for chunk in client.models.generate_content_stream(
-            model=model,
-            contents=contents,
-            config=generate_content_config,
+    for chunk in client.models.generate_content_stream(
+        model=model,
+        contents=contents,
+        config=generate_content_config,
+    ):
+        if (
+            chunk.candidates is None
+            or chunk.candidates[0].content is None
+            or chunk.candidates[0].content.parts is None
         ):
-            if (
-                chunk.candidates is None
-                or chunk.candidates[0].content is None
-                or chunk.candidates[0].content.parts is None
-            ):
-                continue
-            part = chunk.candidates[0].content.parts[0]
-            if part.inline_data and part.inline_data.data:
-                inline_data = part.inline_data
-                data_buffer = inline_data.data
-                file_extension = mimetypes.guess_extension(inline_data.mime_type)
-                if file_extension is None:
-                    file_extension = ".wav"
-                    data_buffer = convert_to_wav(inline_data.data, inline_data.mime_type)
+            continue
+        part = chunk.candidates[0].content.parts[0]
+        if part.inline_data and part.inline_data.data:
+            inline_data = part.inline_data
+            data_buffer = inline_data.data
+            file_extension = mimetypes.guess_extension(inline_data.mime_type)
+            if file_extension is None:
+                file_extension = ".wav"
+                data_buffer = convert_to_wav(inline_data.data, inline_data.mime_type)
 
-                # Show download button
-                b64_audio = base64.b64encode(data_buffer).decode()
-                href = f'<a href="data:audio/{file_extension};base64,{b64_audio}" download="output{file_extension}">Download Audio File</a>'
-                st.markdown(href, unsafe_allow_html=True)
-                st.audio(data_buffer, format=f"audio/{file_extension[1:]}")
-            else:
-                st.warning(chunk.text)
+            # Show download button
+            b64_audio = base64.b64encode(data_buffer).decode()
+            href = f'<a href="data:audio/{file_extension};base64,{b64_audio}" download="output{file_extension}">Download Audio File</a>'
+            st.markdown(href, unsafe_allow_html=True)
+            st.audio(data_buffer, format=f"audio/{file_extension[1:]}")
+            break  # Stop after the first valid chunk
+        else:
+            st.warning(chunk.text)
