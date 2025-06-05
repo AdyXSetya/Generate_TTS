@@ -1,12 +1,10 @@
 import streamlit as st
 import base64
 import mimetypes
-import os
-import re
 import struct
 from google import genai
 from google.genai import types
-from urllib.parse import quote, unquote
+from urllib.parse import unquote
 
 # --- FUNGSI UTAMA HARUS DIDEFINISIKAN DI ATAS ---
 def parse_audio_mime_type(mime_type: str) -> dict[str, int | None]:
@@ -60,10 +58,6 @@ def convert_to_wav(audio_data: bytes, mime_type: str) -> bytes:
 
 # --- SAMPAI SINI ---
 
-# Set page config
-st.set_page_config(page_title="Gemini TTS", layout="centered")
-st.title("🔊 Gemini Text-to-Speech Generator")
-
 # Load API Key
 try:
     api_key = st.secrets["GEMINI_API_KEY"]
@@ -81,87 +75,64 @@ voice_name = query_params.get("voice", ["Zephyr"])[0]  # Default to "Zephyr" if 
 # Decode text input (in case it's URL-encoded)
 text_input = unquote(text_input)
 
-# Input Form (Optional: For users who want to manually edit the text)
-text_input = st.text_area("Enter your text (supports SSML):", value=text_input)
-
-# Voice selection
-voice_options = ["Zephyr", "Echo", "Fable", "Onyx", "Nova", "Shimmer"]
-voice_name = st.selectbox("Choose voice:", voice_options, index=voice_options.index(voice_name))
-
-# Generate a URL for sharing or testing
-encoded_text = quote(text_input)
-url = f"?text={encoded_text}&voice={voice_name}"
-st.markdown(f"**Share this URL to generate the same audio:**\n\n[{st.session_state.get('server_url', 'http://localhost:8501')}{url}]({st.session_state.get('server_url', 'http://localhost:8501')}{url})", unsafe_allow_html=True)
-
-# Auto-generate logic
+# Check if both required parameters are present
 if text_input and voice_name:
-    with st.spinner("Generating audio..."):
-
-        model = "gemini-2.5-flash-preview-tts"
-        contents = [
-            types.Content(
-                role="user",
-                parts=[
-                    types.Part.from_text(text=text_input),
-                ],
-            ),
-        ]
-        generate_content_config = types.GenerateContentConfig(
-            temperature=1,
-            response_modalities=["audio"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name=voice_name
-                    )
+    model = "gemini-2.5-flash-preview-tts"
+    contents = [
+        types.Content(
+            role="user",
+            parts=[
+                types.Part.from_text(text=text_input),
+            ],
+        ),
+    ]
+    generate_content_config = types.GenerateContentConfig(
+        temperature=1,
+        response_modalities=["audio"],
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                    voice_name=voice_name
                 )
-            ),
-        )
+            )
+        ),
+    )
 
-        # Store the generated response in a dictionary
-        response_data = {
-            "text": text_input,
-            "voice": voice_name,
-            "audio_generated": False,
-            "audio_data": None,
-            "mime_type": None,
-            "error": None,
-        }
+    for chunk in client.models.generate_content_stream(
+        model=model,
+        contents=contents,
+        config=generate_content_config,
+    ):
+        if (
+            chunk.candidates is None
+            or chunk.candidates[0].content is None
+            or chunk.candidates[0].content.parts is None
+        ):
+            continue
+        part = chunk.candidates[0].content.parts[0]
+        if part.inline_data and part.inline_data.data:
+            inline_data = part.inline_data
+            data_buffer = inline_data.data
+            file_extension = mimetypes.guess_extension(inline_data.mime_type)
+            if file_extension is None:
+                file_extension = ".wav"
+                data_buffer = convert_to_wav(inline_data.data, inline_data.mime_type)
 
-        try:
-            for chunk in client.models.generate_content_stream(
-                model=model,
-                contents=contents,
-                config=generate_content_config,
-            ):
-                if (
-                    chunk.candidates is None
-                    or chunk.candidates[0].content is None
-                    or chunk.candidates[0].content.parts is None
-                ):
-                    continue
-                part = chunk.candidates[0].content.parts[0]
-                if part.inline_data and part.inline_data.data:
-                    inline_data = part.inline_data
-                    data_buffer = inline_data.data
-                    file_extension = mimetypes.guess_extension(inline_data.mime_type)
-                    if file_extension is None:
-                        file_extension = ".wav"
-                        data_buffer = convert_to_wav(inline_data.data, inline_data.mime_type)
+            b64_audio = base64.b64encode(data_buffer).decode()
+            url_download = f"data:audio/{file_extension[1:]};base64,{b64_audio}"
 
-                    # Update response data
-                    response_data["audio_generated"] = True
-                    response_data["audio_data"] = base64.b64encode(data_buffer).decode()
-                    response_data["mime_type"] = inline_data.mime_type
-                    break  # Stop after the first valid chunk
-                else:
-                    response_data["error"] = chunk.text
-        except Exception as e:
-            response_data["error"] = str(e)
+            result = {
+                "audio": b64_audio,
+                "mime_type": inline_data.mime_type,
+                "file_extension": file_extension,
+                "url_download": url_download,
+            }
 
-        # Display the response as JSON
-        st.subheader("Generated Response (JSON)")
-        st.json(response_data)
-
+            st.json(result)
+            break
 else:
-    st.info("Please provide both 'text' and 'voice' parameters in the URL to auto-generate audio.")
+    st.json({
+        "error": "Missing required parameters",
+        "required": ["text", "voice"],
+        "example_url": "?text=Hello%20World&voice=Zephyr"
+    })
