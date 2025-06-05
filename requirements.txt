@@ -1,3 +1,5 @@
+fastapi
+uvicorn
 google-genai
-streamlit
 protobuf
+python-dotenv
